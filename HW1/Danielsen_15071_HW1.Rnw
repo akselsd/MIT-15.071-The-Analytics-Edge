@@ -85,7 +85,7 @@ salesdf = data.frame(
 salesdf$Month.FactorUnique = factor(salesdf$m, levels=unique(salesdf$m))
 @
 
-<<echo=T>>=
+<<echo=F>>=
 g = ggplot(salesdf, aes(x=Month.FactorUnique,y=MonthlyAvgSales))
 g = g + geom_point()
 g = g + labs(title="Wrangler Sales", y="Avgerage Sales", x = "Month")
@@ -94,22 +94,29 @@ g = g + theme(axis.text.x = element_text(angle=45, hjust = 1))
 @
 
 \begin{figure}[!htb]
+
 <<fig.width=7, fig.height=3>>=
 g2 = ggplot(salesdf, aes(y=q, x=Month.FactorUnique))
 g2 = g2 + geom_point()
 g2 = g2 + labs(title="Wrangler Queries", y="Avgerage Queries", x = "Month")
 g2 = g2 + theme(axis.text.x = element_text(angle=45, hjust = 1))
-g2
+
+plot(we.train$date, we.train$Wrangler.Queries, main="Wrangler Queries", xlab="Month", ylab="Queries")
 @
+\caption{Wrangler queries from 2010 to 2017}
+\label{fig:wq}
 \end{figure}
 
 \begin{figure}[!htb]
-<<fig.width=7, fig.height=3>>=
-g
+
+<<test2, fig.width=7, fig.height=3>>=
+plot(we.train$date, we.train$Wrangler.Sales, main="Wrangler Sales", xlab="Month", ylab="Sales")
 @
+\caption{Wrangler sales from 2010 to 2017}
+\label{fig:ws}
 \end{figure}
 
-The first plot indicate that there is most queries for the Wrangler during the spring and summer. Logically this should correlate with sales, and the second plot shows it does, as expected. It suggests that most americans buy a new jeep when it is warm and good conditions for driving Jeeps. The low sales in January and February might also be partially caused by overspending during the holidays.
+Plots \ref{fig:wq} and \ref{fig:ws} indicate that there is most queries for the Wrangler during the spring and summer. Logically this should correlate with sales, and the second plot shows it does, as expected. It suggests that most americans buy a new jeep when it is warm and good conditions for driving Jeeps. The generally low sales in January and February might also be partially caused by overspending during the holidays.
 
 \subsection*{d}
 
@@ -182,23 +189,29 @@ salesdfE$Month.FactorUnique = factor(salesdfE$m, levels=unique(salesdfE$m))
 @
 
 \begin{figure}[!htb]
+
 <<fig.width=7, fig.height=3>>=
 g3 = ggplot(salesdfE, aes(y=q, x=Month.FactorUnique))
 g3 = g3 + geom_point()
 g3 = g3 + labs(title="Elantra Queries", y="Avgerage Queries", x = "Month")
 g3 = g3 + theme(axis.text.x = element_text(angle=45, hjust = 1))
-g3
+plot(we.train$date, we.train$Elantra.Queries, main="Elantra Queries", xlab="Month", ylab="Queries")
 @
+\caption{Elantra queries from 2010 to 2017}
+\label{fig:eq}
 \end{figure}
 
 \begin{figure}[!htb]
+
 <<fig.width=7, fig.height=3>>=
 g4 = ggplot(salesdfE, aes(y=MonthlyAvgSales, x=Month.FactorUnique))
 g4 = g4 + geom_point()
 g4 = g4 + labs(title="Elantra Sales", y="Avgerage Sales", x = "Month")
 g4 = g4 + theme(axis.text.x = element_text(angle=45, hjust = 1))
-g4
+plot(we.train$date, we.train$Elantra.Sales, main="Elantra Sales", xlab="Month", ylab="Sales")
 @
+\caption{Elantra sales from 2010 to 2017}
+\label{fig:es}
 \end{figure}
 
 <<echo=T, results=T>>=
@@ -206,7 +219,7 @@ cor(we[,c("Elantra.Sales", "Year", "Unemployment.Rate", "Elantra.Queries","CPI.E
 cor(we[,c("Wrangler.Sales", "Year", "Unemployment.Rate", "Wrangler.Queries","CPI.Energy")])
 @
 
-We can see from the plots and correlation matrix that the Elentra Queries and Sales are much less correlated than Wrangler Queries and Sales. Also the Wrangler sales are more correlated with \textbf{CPI.Energy} than Elentra sales are. Higher correlation makes for better prediction. From a business viewpoint, I would guess the Jeep is more of a seasonal car, while the Eletra is an around the year model. So there is less patterns in the data for our model to exploit.  \\
+We can see from plots \ref{fig:eq} and \ref{fig:es}, and the correlation matrix that the Elentra Queries and Sales are much less correlated than Wrangler Queries and Sales. Also the Wrangler sales are more correlated with \textbf{CPI.Energy} than Elentra sales are. From a business viewpoint, I would guess the Jeep is more of a seasonal car, while the Eletra is an around the year model. So there is less patterns in the data for our model to exploit.  \\
 
 I suspect we need more data that is statistically significant for the Elentra Sales to make any substantial progress. We could try playing around with interaction terms and other nonlinear feature maps in the regression model, but with insufficient data we can only get so far.
 
