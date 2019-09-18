@@ -1,0 +1,227 @@
+\documentclass{article}
+\usepackage[legalpaper, margin=1in]{geometry}
+\begin{document}
+
+<<echo=F>>=
+library("knitr")
+library(ggplot2)
+library(comprehenr)
+opts_chunk$set(echo = F,
+               message = F,
+               warning = F,
+               results = F,
+               fig=TRUE)
+
+@
+
+\section*{2}
+\subsection*{a}
+
+<<>>=
+# Read dataset
+rm(list=ls())
+
+we = read.csv("WranglerElantra2018.csv")
+
+@
+
+<<echo=T>>=
+
+# Split and build model
+we.train = we[we$Year <= 2017,]
+we.test = we[we$Year == 2018,]
+lm.model2a = lm(Wrangler.Sales ~ Year + Unemployment.Rate + 
+                  Wrangler.Queries + CPI.Energy + CPI.All, data=we.train)
+@
+
+Inspecting the summary reveals that all except \textbf{CPI.All} are significant. Lets drop this predictor and refit the model. The $R^2$ of this new model is fairly good with $0.824$, but the $OSR^2$ is only $0.5172$. Also there is suspicious results, like a negative coeffisient for the \textbf{Year} predictor. Inspecting the correlation matrix reveals that \textbf{Year, Unemployment.Rate} \textbf{Wrangler.Queries} are all heavily correlated. After trying different combinations , the best choice seems to be to drop
+\textbf{Year} and \textbf{Unemployment.Rate} based on the values of $OSR^2$ and $R^2$.
+
+<<results=F>>=
+lm.model2a = lm(Wrangler.Sales ~ Year + Unemployment.Rate + Wrangler.Queries + CPI.Energy, data=we.train)
+summary(lm.model2a)
+@
+
+\subsection*{b}
+<<echo=1>>=
+lm.model2b = lm(Wrangler.Sales ~ Wrangler.Queries + CPI.Energy, data=we.train)
+summary(lm.model2b)
+@
+
+\textbf{Memo}
+
+This model based on linear regression predicts yearly Wrangler sales. The model is based on a dataset of sales between 2010 and 2017. Since there was a heavy correlation between the year, unemployment rate and google searches for "jeep wrangler" in that period, only the query data is included in the predictors as this seemed to give the best $R^2$ and $OSR^2$. The model has a $R^2$ value of $0.7497$. To predict the sales for a year, calculate
+
+\begin{equation}
+  -6036.38 + 208.83x_1 + 30.65x_2
+\end{equation}
+
+where $x_1$ is a (normalized) approximation of the number of Google
+searches for “jeep wrangler” in the United States in the
+given month and year and $x_2$ is the CPI index for the energy sector. The model therefore suggests that the sale is increasing with the CPI index and wrangler searches. Evaluating the model on unseen date from 2018 gives an $OSR^2$ of $0.6943$. This is a bit lower than for the training data, which is expected.
+
+
+<<echo=T, results=T>>=
+pred = predict(lm.model2b, newdata = we.test)
+actual = we.test$Wrangler.Sales
+baseline = mean(we.train$Wrangler.Sales)
+OSR2 = 1 - sum((actual - pred)**2) / sum((actual - baseline)**2)
+OSR2
+@
+
+\subsection*{c}
+
+<<>>=
+months = we$Month.Factor[1:12]
+sales = to_vec(for (m in months) mean(we$Wrangler.Sales[we$Month.Factor==m]))
+queries = to_vec(for (m in months) mean(we$Wrangler.Queries[we$Month.Factor==m]))
+
+salesdf = data.frame(
+  m = months,
+  MonthlyAvgSales = sales,
+  q = queries
+)
+
+salesdf$Month.FactorUnique = factor(salesdf$m, levels=unique(salesdf$m))
+@
+
+<<echo=T>>=
+g = ggplot(salesdf, aes(x=Month.FactorUnique,y=MonthlyAvgSales))
+g = g + geom_point()
+g = g + labs(title="Wrangler Sales", y="Avgerage Sales", x = "Month")
+g = g + theme(axis.text.x = element_text(angle=45, hjust = 1))
+
+@
+
+\begin{figure}[!htb]
+<<fig.width=7, fig.height=3>>=
+g2 = ggplot(salesdf, aes(y=q, x=Month.FactorUnique))
+g2 = g2 + geom_point()
+g2 = g2 + labs(title="Wrangler Queries", y="Avgerage Queries", x = "Month")
+g2 = g2 + theme(axis.text.x = element_text(angle=45, hjust = 1))
+g2
+@
+\end{figure}
+
+\begin{figure}[!htb]
+<<fig.width=7, fig.height=3>>=
+g
+@
+\end{figure}
+
+The first plot indicate that there is most queries for the Wrangler during the spring and summer. Logically this should correlate with sales, and the second plot shows it does, as expected. It suggests that most americans buy a new jeep when it is warm and good conditions for driving Jeeps. The low sales in January and February might also be partially caused by overspending during the holidays.
+
+\subsection*{d}
+
+<<echo=T, results=T>>=
+lm.model2d = lm(Wrangler.Sales ~  Wrangler.Queries + 
+                   CPI.Energy + Month.Factor, data=we.train)
+pred = predict(lm.model2d, newdata = we.test)
+actual = we.test$Wrangler.Sales
+baseline = mean(we.train$Wrangler.Sales)
+OSR2 = 1 - sum((actual - pred)**2) / sum((actual - baseline)**2)
+OSR2
+
+@
+
+
+
+<<>>=
+
+summary(lm.model2d)
+cor(we[,c("Wrangler.Sales", "Year", "Unemployment.Rate", "Wrangler.Queries","CPI.Energy")])
+@
+
+This modified model now also uses the data of the months to model the seasons. Like the previous problem illustrated, the month is an important predictor for the amount of sales, and as expected the inclusion of the month improves the model. The $R^2$ is now $0.8741$, and $OSR^2$ is $0.7528$. The new equation for the model is
+
+\begin{equation}
+  -1599.6 + \sum^{12}_{i=1}a_ix_i + 187x_{13} + 21.1x_{14} + 
+\end{equation}
+
+where $x_{13}$ is the queries and $x_{14}$ is the CPI index as before, and $x_i$ is $1$ if we are in the $i$-th month (January = 1, February = 2 and so on) of the year, $0$ otherwise. The coeffisients for the months is given as
+
+<<echo=T, results=T>>=
+coef(lm.model2d)
+@
+
+where each coeffisient is the differance in sales as compared to April ($a_4 = 0$). Of these variables, only \textbf{Wrangler.Queries}, \textbf{CPI.Energy} and the variables for January, February and November are statistically significant. 
+
+
+\subsection*{e}
+
+<<echo=T>>=
+lm.model2e = lm(Elantra.Sales ~  Elantra.Queries + 
+                   CPI.Energy + Month.Factor, data=we.train)
+
+@
+
+<<>>=
+summary(lm.model2e)
+pred = predict(lm.model2e, newdata = we.test)
+actual = we.test$Elantra.Sales
+baseline = mean(we.train$Elantra.Sales)
+OSR2 = 1 - sum((actual - pred)**2) / sum((actual - baseline)**2)
+OSR2
+@
+
+For the Elantra model, we get a $R^2$ of $0.4755$ and an $OSR^2$ of $-2.452$. This is terrible. Simply guessing the mean would have been better for the test data.
+
+\subsection*{f}
+
+<<>>=
+salesE = to_vec(for (m in months) mean(we$Elantra.Sales[we$Month.Factor==m]))
+queriesE = to_vec(for (m in months) mean(we$Elantra.Queries[we$Month.Factor==m]))
+
+salesdfE = data.frame(
+  m = months,
+  MonthlyAvgSales = salesE,
+  q = queriesE
+)
+
+salesdfE$Month.FactorUnique = factor(salesdfE$m, levels=unique(salesdfE$m))
+@
+
+\begin{figure}[!htb]
+<<fig.width=7, fig.height=3>>=
+g3 = ggplot(salesdfE, aes(y=q, x=Month.FactorUnique))
+g3 = g3 + geom_point()
+g3 = g3 + labs(title="Elantra Queries", y="Avgerage Queries", x = "Month")
+g3 = g3 + theme(axis.text.x = element_text(angle=45, hjust = 1))
+g3
+@
+\end{figure}
+
+\begin{figure}[!htb]
+<<fig.width=7, fig.height=3>>=
+g4 = ggplot(salesdfE, aes(y=MonthlyAvgSales, x=Month.FactorUnique))
+g4 = g4 + geom_point()
+g4 = g4 + labs(title="Elantra Sales", y="Avgerage Sales", x = "Month")
+g4 = g4 + theme(axis.text.x = element_text(angle=45, hjust = 1))
+g4
+@
+\end{figure}
+
+<<echo=T, results=T>>=
+cor(we[,c("Elantra.Sales", "Year", "Unemployment.Rate", "Elantra.Queries","CPI.Energy")])
+cor(we[,c("Wrangler.Sales", "Year", "Unemployment.Rate", "Wrangler.Queries","CPI.Energy")])
+@
+
+We can see from the plots and correlation matrix that the Elentra Queries and Sales are much less correlated than Wrangler Queries and Sales. Also the Wrangler sales are more correlated with \textbf{CPI.Energy} than Elentra sales are. Higher correlation makes for better prediction. From a business viewpoint, I would guess the Jeep is more of a seasonal car, while the Eletra is an around the year model. So there is less patterns in the data for our model to exploit.  \\
+
+I suspect we need more data that is statistically significant for the Elentra Sales to make any substantial progress. We could try playing around with interaction terms and other nonlinear feature maps in the regression model, but with insufficient data we can only get so far.
+
+
+\subsection*{g}
+
+If we produce more vehicles than actual demand, we would need to pay more for inventory storage and logistics. There would also be a risk of having to discount vehicles in order to clear up inventory space and reduce losses before arrival of new models.
+There are no direct costs when producing under demand. Still, we are losing out on business, and potentially making customers unhappy. In general I suspect the costs of producing too much is greater than making too few. So in general I would probably recommend producing less than predicted.
+
+The current model is minimizing the loss function
+
+\begin{equation}
+  L(w, w_0) = \sum_{i=1}^{N} (y_i - \hat{y_i})^2
+\end{equation}
+
+where $\hat{y_i} = \textbf{w}^T\textbf{x} + w_0$, which corresponds to the least square error. If we instead optimize the coeffisients over some other loss function that penalizes errors from estimating too high more, we would most likely get a more conservative model. Another option is to estimate the cost for each unit produced over demand, and the expected profit per sale. Then we could optimize the expected profit as a function of produced units based on the expected demand and standard error. 
+
+\end{document}
