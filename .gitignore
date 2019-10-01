@@ -3,3 +3,5 @@ Rec/*
 *.tex
 *.log
 */.RData
+*.gz
+*.csv

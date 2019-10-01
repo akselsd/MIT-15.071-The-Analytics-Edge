@@ -1,0 +1,212 @@
+\documentclass{article}
+\usepackage[legalpaper, margin=1in]{geometry}
+\usepackage{amsmath}
+\begin{document}
+
+<<echo=F>>=
+library("knitr")
+library(caTools)
+library(ggplot2)
+library(comprehenr)
+
+opts_chunk$set(echo = F,
+               message = F,
+               warning = F,
+               results = F,
+               fig=TRUE)
+
+@
+
+<<>>=
+library(caret)
+library(ROCR)
+@
+
+\subsection*{2a}
+
+Let $X$ be the cost of a person on medication, and $\bar{X}$ of a person without medication. Then taking the expected value gives
+
+\begin{equation}
+\begin{split}
+  E[X] &= -172500p/2.3 -7500(1-p/2.3) = -71739p-7500 \\
+  E[\bar{X}] &= -165000p
+\end{split}
+\end{equation}
+\\
+From an economic point of view, you should prescribe medication when $E[X] > E[\bar{X}]$ in order to minimize the expected loss of the outcome
+
+\begin{equation}
+\begin{split}
+  -71739p-7500 &> -165000p \\
+  p &> 0.0804
+\end{split}
+\end{equation}
+
+So we should prescribe medication when $p$ is over $8.04\%$.
+
+\subsection*{2b}
+ <<>>=
+data = read.csv("framingham.csv")
+data$TenYearCHD <- factor(data$TenYearCHD)
+data$male <- factor(data$male)
+data$currentSmoker <- factor(data$currentSmoker)
+data$BPMeds <- factor(data$BPMeds)
+data$prevalentStroke <- factor(data$prevalentStroke)
+data$prevalentHyp <- factor(data$prevalentHyp)
+data$diabetes <- factor(data$diabetes)
+set.seed(38)
+N <- nrow(data)
+idx = sample.split(data$TenYearCHD, 0.75)
+train <- data[idx,]
+test = data[!idx,]
+@
+
+<<echo=T>>=
+model2b = glm(TenYearCHD ~ ., family="binomial", data=train)
+@ 
+
+<<>>=
+summary(model2b)
+@
+From the summary of the model we can see that gender, age, cigarettes per day, total cholesterol, systolic blood pressure and blood glucose level is staistically significant. They all have positive coefficients, so the risk increases with these factors. Most of these, like gender, age, cigarettes per day, cholestetrol and blood pressure are "known" for increasing risk of heart diseases, so these results are not very surprising. I am, however, a bit surprised that BMI is not more significant.
+
+\subsection*{c}
+
+<<echo=T, results=T>>=
+pasient1 = data.frame(
+  male = "1",
+  age = 55,
+  education = "College",
+  currentSmoker = "1",
+  cigsPerDay = 10,
+  BPMeds = "0",
+  prevalentStroke = "0",
+  prevalentHyp = "1",
+  diabetes = "0",
+  totChol = 220,
+  sysBP = 140,
+  diaBP = 100,
+  BMI = 30,
+  heartRate = 60,
+  glucose = 80
+)
+risk = predict(model2b, newdata=pasient1, type="response")
+risk
+@
+
+So about a $25\%$ chance. So he should get the medication, and should probably also make some changes to his lifestyle.
+
+\subsection*{d}
+
+Experimenting with reducing different values in the model to normal health values produced the following results
+
+\begin{center}
+\begin{tabular} {|c|c|}
+
+\hline
+Action & Reduction in risk \\
+\hline\hline
+Stop smoking & 3.29\% \\
+Reduce cholesterol to 195 & 1.49\%\\
+Reduce systolic blood pressure to 115 & 6.04\% \\
+Reduce BMI to 24 & 0.73\% \\
+\hline
+
+\end{tabular}
+\end{center}
+
+The most effective actions seems to be to stop smoking and reducing the blood pressure. So the physician should tell him to a) Stop smoking and b) Excercise more and cut down on alcohol and caffeine. 
+
+\subsection*{e}
+
+Predicting on the test set gives the confusion matrix 
+<<echo=T, results=T>>=
+threshold = 0.0804
+pred = predict(model2b, newdata = test, type = "response")
+confusion.matrix = table(test$TenYearCHD, (pred > threshold))
+confusion.matrix
+@
+With the confusion matrix, we can compute the metrics for our model
+<<echo=T, results=T>>=
+accuracy = sum(diag(confusion.matrix)) / sum(confusion.matrix)
+accuracy
+tp = confusion.matrix[2, 2] / sum(confusion.matrix[2,])
+tp
+fp = confusion.matrix[1, 2] / sum(confusion.matrix[1,])
+fp
+@
+For a true positive pasient, the cost will be $\$7500 + \$165000/2.3$, as the rate is decreased by a factor of $2.3$. For the true negative pasients, we have no cost. For the false positive pasients we are paying for the medication, so \$7500. Lastly, for the false negatives we are paying \$165,000 for the disease at full rate. Our predictions on the test set therefore totals to
+
+<<echo=T, results=T>>=
+prices = matrix(c(0, 7500, 165000, 7500 + 165000 / 2.3), nrow = 2, ncol = 2, byrow=TRUE)
+totalCost = sum(prices * confusion.matrix)
+totalCost
+@
+
+The pasients in the test set have a total cost of \$15,960,652, an average of \$17,462 per pasient.
+
+\subsection*{f}
+The baseline model would be the current situation, which is no medication. In that case, we pay nothing for the negatives, and \$165,000 for the positives.
+
+<<echo=T, results=T>>=
+nPos = sum(confusion.matrix[2,])
+baselineCost = nPos * 165000
+baselineCost
+@
+Which gives a total economic cost of \$22,935,000, and average of \$25,093 per pasient. 
+
+The ideal would of course be to give all these people medication.
+<<echo=T, results=T>>=
+idealCost = nPos * (7500 + 165000/2.3)
+idealCost
+@
+Which gives a total economic cost of \$11,014,239, and average of \$12,051 per pasient.\\
+
+If none of the pasients in the Framingham study recieves medicine, there is an economic cost of \$22,935,000. However, if we somehow knew who would develop the disease and gave them medicine in advance, the total would be reduced to \$11,014,239. The prediction model based on the Framingham dataset is partially able to predict who will develop the disease, and using this model would reduce the cost to \$15,960,652, which is a reduction of 58.5\% as compared to not prescribing medicine to anyone.
+
+\subsection*{g}
+
+\begin{figure}
+<<fig.width = 4, fig.height = 4, echo=T, results=T, fig.align="center">>=
+rocr.pred = prediction(pred, test$TenYearCHD)
+plot(performance(rocr.pred, "tpr", "fpr"))
+@
+\caption{ROC curve for the test data of the Framingham dataset}
+\label{fig:roc}
+\end{figure}
+
+To calculte the area under the curve for the test set we can use
+<<echo=T, results=T>>=
+as.numeric(performance(rocr.pred, "auc")@y.values)
+@
+which gives 0.7416.
+
+Just around the part of the curve with a $0.6$ false positive rate, there is a part of the curve which is horizontal, indicating that we are getting a higher false positive rate, without an increased true positive rate. 
+
+\subsection*{h}
+
+In our model, both gender and age is highly significant, and their coeffisients are quite large, so let us include them. Also from the earlier discussion, reducing systolic blood pressure is a very effective action, as well as a significant variable, so let us include that as the third variable.
+
+<<echo=T, results=T>>=
+model2h = glm(TenYearCHD ~ age + male + sysBP, family = "binomial", data = train)
+pred.s = predict(model2h, newdata = test, type = "response")
+confusion.matrix.s = table(test$TenYearCHD, (pred.s > threshold))
+totalCost.s = sum(prices * confusion.matrix.s)
+totalCost.s - totalCost
+@
+
+This model actually results in a lower economic cost by about \$36,000. Inspecting the confusion matrix reveals that this model chooses to medicate 20 more people than the original, 2 of which got the disease. So the overall accuracy is lower, but it is "worth it" to medicate 10 people as long as at least 1 of them gets the disease.
+
+<<>>=
+accuracy.s = sum(diag(confusion.matrix.s)) / sum(confusion.matrix.s)
+accuracy.s - accuracy
+nNeg = sum(confusion.matrix[1,])
+nNeg + nPos
+nNeg * 7500 + idealCost
+@
+
+\subsection*{i}
+I think it is very difficult and ethically questionable to estimate the monetary cost of the getting the disease. What about the relatives of the sick? Should we reduce the cost with age, as they have a lower life expectancy anyways?\\
+If we chose to medicate some but not all, no matter how we estimate the cost of getting the disease, we will have to make some hard decisions. Like "Your life is not worth enough to get a prescription" or "You are not unhealthy \textit{enough} to get a prescription". Perhaps the analysis should only consider two choices, prescribe the medication to all or none (in which case prescribing the medicine to all would be the least costly, by a big margin).
+
+\end{document}
