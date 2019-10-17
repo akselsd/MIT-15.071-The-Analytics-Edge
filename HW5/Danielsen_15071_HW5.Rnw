@@ -1,0 +1,255 @@
+\documentclass{article}
+\usepackage[legalpaper, margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{cleveref}
+\begin{document}
+
+<<echo=F>>=
+library("knitr")
+library(ggplot2)
+library(lattice)
+library(caTools)
+library(comprehenr)
+
+
+opts_chunk$set(echo = F,
+               message = F,
+               warning = F,
+               results = F,
+               fig=TRUE)
+
+@
+
+<<>>=
+library(caret)
+library(ROCR)
+library(randomForest)
+library(reshape2)
+library(tidyverse)
+library(tm) # Will use to create corpus and modify text therein.
+library(SnowballC) # Will use for "stemming." 
+library(rpart) # Will use to construct a CART model.
+library(rpart.plot) # Will use to plot CART tree.
+library(softImpute)
+@
+
+\section*{Problem 1: Predicting AirBnB review scores}
+\subsection*{a}
+<<results=T, echo=T>>=
+reviews = read.csv("airbnb-small.csv", stringsAsFactors = F)
+
+for (nStar in 1:5){
+  nStar_reviews = reviews[reviews$review_scores_rating == nStar,]
+  cat("Rating:", nStar,"\n",
+      "Number of reviews:", nrow(nStar_reviews), "\n",
+      "Average length (in chars):", mean(nchar(nStar_reviews$comments)),"\n")
+  
+}
+@
+
+The number of reviews are unbalanced. I would guess that the normal rating is 5 stars, and guests only rate lower if it something they are explicitly not happy about. Also the length of the reviews are longer for low ratings, i.e. people are more inclined to fully report bad experiences than good experiences. 
+
+\subsection*{b}
+
+<<echo=T, results=T>>=
+corpus = Corpus(VectorSource(reviews$comments)) # An array of document
+corpus = tm_map(corpus, tolower)
+corpus = tm_map(corpus, removeWords, stopwords("english"))
+corpus = tm_map(corpus, removeWords, c("airbnb"))
+corpus = tm_map(corpus, stemDocument)
+strwrap(corpus[[1]])
+strwrap(corpus[[2]])
+strwrap(corpus[[3]])
+@
+
+\subsection*{c}
+<<echo=T, results=T>>=
+frequencies = DocumentTermMatrix(corpus)
+findFreqTerms(frequencies, lowfreq=800)
+sparse = removeSparseTerms(frequencies, 0.99)
+sparse
+@
+
+So we have 426 terms left.
+
+\subsection*{d}
+<<echo=T, results=T>>=
+reviewTerms = as.data.frame(as.matrix(sparse))
+reviewTerms$rlength = nchar(reviews$comments)
+reviewTerms$feeling = cut(x=reviews$review_scores_rating, breaks = c(0, 3, 5))
+levels(reviewTerms$feeling) = c("Negative", "Positive")
+
+reviewTrain = reviewTerms[reviews$date < "2018-01-01",]
+reviewTest = reviewTerms[reviews$date >= "2018-01-01",]
+table(reviewTrain$feeling)
+table(reviewTest$feeling)
+@
+
+So the proportion of negative reviews in the training set is $0.0731$, and $0.0416$ in the testing set. This indicates reviews get more positive over time, and perhaps we have a shift in the underlying distribution of reviews between training and test, which would make the prediction of our model worse on the testing set.
+
+\subsection*{e}
+
+<<echo=T>>=
+review.tree1 = rpart(feeling ~., data=reviewTrain, cp=0.01)
+@
+
+The three trees can be seen in \cref{fig:revTree1}, \cref{fig:revTree2} and \cref{fig:revTree3}. They have a CP of $0.01$, $0.005$ and $0.001$, respectively.
+
+Tree one is the simplest tree, and the review will be negative if the word \textit{bathroom} is mentioned along with \textit{expect}, or the term \textit{recommen} is absent  , but the term $host$ is not. 
+
+Tree number two is a bit bigger, but we can see some of the trends from the first tree. A review tends to be positive if positive terms like \textit{great} or \textit{recommen} is present, or the review is short. Also the term \textit{expect} is a bad sign, which makes sense as it would be used frequently by complaining guests who did not get what they expected.
+
+In the last tree, we can for example also see that the absence of the term \textit{help} and \textit{stay} is positive. Surprisingly, the term \textit{nois} is positive. I would expected this to be correlated with noise complaints and therefore negative. Inspecting the reviews with this term included reveals that most of the comments is about the low amount of noise, which explains the value in the tree.
+
+
+\begin{figure}
+<<>>=
+prp(review.tree1)
+@
+\caption{CART tree with CP = 0.01}
+\label{fig:revTree1}
+\end{figure}
+
+<<>>=
+review.tree2 = rpart(feeling ~., data=reviewTrain, cp=0.005)
+@
+
+\begin{figure}
+<<>>=
+prp(review.tree2)
+@
+\caption{CART tree with CP = 0.005}
+\label{fig:revTree2}
+\end{figure}
+
+<<>>=
+review.tree3 = rpart(feeling ~., data=reviewTrain, cp=0.001)
+@
+
+\begin{figure}
+<<>>=
+prp(review.tree3)
+@
+\caption{CART tree with CP = 0.001}
+\label{fig:revTree3}
+\end{figure}
+
+\subsection*{f}
+
+
+The baseline could be to just guess the majority every time, so positive. 
+
+<<echo=t, results=T>>=
+printMetrics = function(preds){
+  CM = table(reviewTest$feeling, preds)
+  print(CM)
+  acc = sum(diag(CM)) / sum(CM)
+  tpr = CM[2,2]/sum(CM[2,])
+  fpr = CM[1,2]/sum(CM[1,])
+  
+  cat("Accuracy: ", acc, "\n")
+  cat("TPR:", tpr, "\n")
+  cat("FPR:", fpr, "\n")
+}
+printMetrics(predict(review.tree1, newdata=reviewTest, type = "class"))
+printMetrics(predict(review.tree2, newdata=reviewTest, type = "class"))
+printMetrics(predict(review.tree3, newdata=reviewTest, type = "class"))
+@
+
+While the baseline has an accuracy of $0.9584$, true positive rate of $1$, and a false positive rate of $1$. So for all models, both the false and true positive rate is very high, which is simply because the ratio of positive to negative is very high, so guessing mostly positive will always be a good solution when considering accuracy as a metric.
+
+
+
+\section*{Problem 2: Recommending Songs}
+\subsection*{a}
+
+<<>>=
+songs <- read.csv("Songs.csv")
+users <- read.csv("Users.csv")
+music <- read.csv("MusicRatings.csv")
+@
+
+<<>>=
+source("functionsCF.R")
+set.seed(144)
+training.rows <- cf.training.set(music$userID, music$songID, prop=0.92)
+music.train <- music[training.rows,]
+music.test <- music[-training.rows,]
+mat.train <- Incomplete(music.train[,1], music.train[,2], music.train[,3])
+set.seed(15071)
+mat.scaled <- biScale(mat.train, maxit=1000, row.scale = FALSE, col.scale = FALSE)
+@
+
+<<echo=T>>=
+ranks = seq(1,10)
+prop.validate = 0.05
+scores = cf.evaluate.ranks(music.train, ranks, prop.validate)
+@
+
+From the figure \cref{fig:modelp} is seems a low number of users is the best, i.e. $2$, $3$ or $4$, based on which metric you observe. I did not expect it to be so few, as I thought there would be more diverse taste in music. Lets continue with $3$ users, as this is the middle value of our candidates.
+
+\begin{figure}[!hp]
+<<fig.height=5>>=
+plotdata = melt(scores, id.vars="rank")
+ggplot(data=plotdata, aes(rank, value, col=variable)) + geom_point() + geom_line()
+@
+\caption{Model performance as a function of the rank}
+\label{fig:modelp}
+\end{figure}
+
+\subsection*{b}
+<<echo=T, results=T>>=
+set.seed(15071)
+fit = softImpute(mat.scaled, rank.max=3, maxit=1000)
+preds <- impute(fit, music.test$userID, music.test$songID)
+
+avg = mean(music.test$rating)
+TSS = sum((music.test$rating - avg)**2)
+RSS = sum((music.test$rating - preds)**2)
+Rsq = 1 - RSS/TSS
+Rsq
+@
+
+So the out-of-sample $R^2$ of the model is $0.31813$. We refit the model in order to take advantage of all our training data. The heuristic function "evaulate.ranks" uses some training data as a holdout set to quickly evaluate the ranks, and we should include this data when training the final model.
+
+\subsection*{c}
+<<echo=T, results=T>>=
+ratings = fit$v * fit$d
+avgRatings = aggregate(ratings, by=list(songs$genre), FUN=mean)
+avgRatings
+@
+
+The first archetype ("V1") clearly does not like Country, but is a fan of Folk. It is pretty much indifferent to the rest, with an exception of a minor distaste for Rap. The second ("V2") only likes Electronic and slighly dislikes everything else. The last archetype ("V3") likes Folk and Pop and strongly dislikes everying else.
+
+\subsection*{d}
+
+<<echo=T, results=T>>=
+daisy.ID = 1584
+daisy.weights = fit$u[daisy.ID,]
+daisy.weights
+
+df = data.frame(
+  scores = fit$v %*% daisy.weights,
+  songID = seq(1:nrow(fit$v))
+)
+
+daisy.ratings = music[music$userID == daisy.ID,]
+daisy.unrated = subset(df, !(songID %in% daisy.ratings$songID))
+
+# Top unrated
+daisy.topscores.unrated = head(daisy.unrated[order(-daisy.unrated$scores),])
+daisy.topsongs.unrated = subset(songs, (songID %in% daisy.topscores.unrated$songID))
+
+# Top already rated
+daisy.topscores.rated = head(daisy.ratings[order(-daisy.ratings$rating),])
+daisy.topsongs.rated = subset(songs, (songID %in% daisy.topscores.rated$songID))
+
+daisy.topsongs.unrated
+daisy.topsongs.rated
+@
+
+This seems reasonable, the algorithm mainly recommends songs in genres she already likes.
+
+\end{document}
+
+
