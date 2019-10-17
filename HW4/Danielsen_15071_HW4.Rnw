@@ -1,0 +1,329 @@
+\documentclass{article}
+\makeatletter
+\def\set@curr@file#1{%
+  \begingroup
+    \escapechar\m@ne
+    \xdef\@curr@file{\expandafter\string\csname #1\endcsname}%
+  \endgroup
+}
+\def\quote@name#1{"\quote@@name#1\@gobble""}
+\def\quote@@name#1"{#1\quote@@name}
+\def\unquote@name#1{\quote@@name#1\@gobble"}
+\makeatother
+
+\usepackage[legalpaper, margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{cleveref}
+\begin{document}
+
+<<echo=F>>=
+library("knitr")
+library(ggplot2)
+library(lattice)
+library(caret) # for randomly splitting training/test 
+library(rpart) # for building CART model
+library(rpart.plot) # a library for an alternative way of plotting CART trees.
+library(caTools)
+library(comprehenr)
+
+
+opts_chunk$set(echo = F,
+               message = F,
+               warning = F,
+               results = F,
+               fig=TRUE)
+
+@
+
+<<>>=
+library(caret)
+library(ROCR)
+library(randomForest)
+library(reshape2)
+@
+
+<<>>=
+ames = read.csv("ames_HW4.csv")
+set.seed(15071)
+split = createDataPartition(ames$SalePrice, p = 0.7, list = FALSE)
+ames.train = ames[split,]
+ames.test = ames[-split,]
+@
+
+\section*{Problem 1: Predicting Housing Prices in Ames, Iowa, Revisited}
+
+\subsection*{a}
+
+<<echo=T>>=
+
+lm.fit = lm(SalePrice ~ ., data=ames.train)
+summary(lm.fit)
+
+@
+
+There are 57 statistically significant at the 95\% level. R tells us that "Coefficients: (8 not defined because of singularities)", indicating that we have linear dependencies in our data. For example, the total amount of square feet in the basement is the sum of the other area variables for the basement area.
+
+\subsection*{b}
+
+<<echo = T, results=T>>=
+cpMax <- 0.0005
+cpMin <- 0.000
+cpStep <- (cpMax - cpMin)/100
+refit = TRUE
+if (refit){
+  set.seed(123) # Reproduce results in case only this chunk is executed
+  cv.amestree = train(SalePrice ~.,
+                 data = ames.train,
+                 method = "rpart",
+                 trControl = trainControl(method="cv"),
+                 metric = "Rsquared",
+                 tuneGrid = data.frame(.cp=seq(cpMin, cpMax, by = cpStep)))
+}
+
+cv.amestree$bestTune
+
+@
+
+So the best value of cp is $0.00019$. 
+
+<<echo=F>>=
+cvtree = rpart(SalePrice ~., data=ames.train, cp=0.00019)
+@
+
+\begin{figure}
+<<>>=
+prp(cvtree)
+@
+\caption{The best tree as chosen by the cross validation}
+\label{fig:cv_tree}
+\end{figure}
+
+The root node is still the external quality, and for the next levels, the size of the house and garage, as well as the neighborhood are important. The whole tree can be seen in \cref{fig:cv_tree}
+
+\subsection*{c}
+
+
+<<echo=T, results=T>>=
+refitForest = TRUE
+if (refitForest){
+  set.seed(123)
+  rf.cv = train(y = ames.train$SalePrice,
+                x = subset(ames.train, select=-c(SalePrice)),
+                method="rf",
+                nodesize=25,
+                ntree=80,
+                trControl=trainControl(method="cv", number=10),
+                tuneGrid=data.frame(mtry=seq(1,20,1))
+  )
+}
+rf.cv$bestTune
+@
+
+So the best value of mtry is 19.
+
+<<>>=
+mtry_opt = 19
+rf.cv = randomForest(SalePrice~.,
+                     data=ames.train,
+                     nodesize=25,
+                     ntree=80,
+                     mtry = mtry_opt
+                     )
+@
+  
+<<echo=T, results=T>>=
+important_vars = importance(rf.cv)
+tail(important_vars[order(important_vars),], 5)
+@
+
+The 5 most important variables are (in decreasing order): neighborhood, living area of ground floor,  the external quality, construction year and the capacity of cars in the garage. This matches fairly well with the results from c).
+
+<<echo=T, results=T>>=
+rmse = function(preds, actual) {
+  n = length(actual)
+  sqe = sum((preds - actual)**2)
+  return(sqrt(sqe/n))
+}
+
+mae = function(preds, actual) {
+  n = length(preds)
+  return(sum(abs(preds - actual)/n))
+}
+
+rsq = function(preds, actual) {
+  avg = mean(actual)
+  
+  tss = sum((actual - avg)**2)
+  rss = sum((actual - preds)**2)
+  return(1 - rss/tss)
+}
+
+metricsFn = function(model) {
+  preds.test = predict(model, newdata = ames.test)
+  preds.train = predict(model, newdata = ames.train)
+  cat("RMSE train")
+  print(rmse(preds.train, ames.train$SalePrice))
+  
+  cat("RMSE test")
+  print(rmse(preds.test, ames.test$SalePrice))
+  
+  cat("MAE train")
+  print(mae(preds.train, ames.train$SalePrice))
+  
+  cat("MAE test")
+  print(mae(preds.test, ames.test$SalePrice))
+  
+  cat("R^2 train")
+  print(rsq(preds.train, ames.train$SalePrice))
+  
+  cat("R^2 test")
+  print(rsq(preds.test, ames.test$SalePrice))
+}
+
+metricsFn(lm.fit)
+
+metricsFn(cvtree)
+
+metricsFn(rf.cv)
+@
+
+
+\subsection*{e}
+Based of these numbers I would suggest using the random forest model, as it outperforms the other models for every metric. We lose a good amount of interpretability compared to the other models, especially the linear one. The CART model is something in between, but in the end I feel increased prediction quality is the most important thing to consider.
+
+\newpage
+\section*{Problem 2: Clustering Stock Returns}
+
+<<>>=
+data = read.csv("returns.csv")
+returns = data[,3:122]
+@
+
+<<echo=T, results=T>>=
+
+entries = aggregate(data, by=list(data$Industry), FUN=length)
+rownames(entries) = entries$Group.1
+entries$N = entries$avg200603
+subset(entries, select = (N))
+
+@
+
+The amount of companies in each sector can be seen above. There are for example 78 companies in the financials industry.
+
+\begin{figure}[!hbp]
+<<echo=T, fig.height=5>>=
+first = which(colnames(returns)=="avg200801")
+last = which(colnames(returns)=="avg201012")
+aggReturns = aggregate(returns[c(first:last)], by=list(data$Industry), FUN=mean)
+rownames(aggReturns) = aggReturns$Group.1
+aggReturns = subset(aggReturns, select = -c(Group.1))
+
+df = as.data.frame(t(aggReturns))
+df$Month = rownames(df)
+df = melt(df, id.vars=c("Month"))
+df$Returns = df$value
+par(mar = c(0.1, 0.1, 0.1, 0.1))
+ggplot(df, aes(x=Month, y=Returns, color=variable, group=variable)) + 
+  geom_line() + 
+  theme(axis.text.x = element_text(angle=80, hjust = 1))
+@
+\caption{The average monthly stock return for 2008 - 2010}
+\label{fig:return}
+\end{figure}
+
+
+As seen in \cref{fig:return} the sectors develop fairly correlated. The crisis in the fall of 2008 can be seen as a big dip for all sectors, and then the bounce back in 2009.
+
+\subsection*{b}
+
+\begin{figure}
+<<echo=T, fig.heigh=4>>=
+d <- dist(returns)
+hclust.mod <- hclust(d, method="ward.D2")
+plot(hclust.mod, labels=F, ylab="Dissimilarity", xlab = "", sub = "")
+@
+\caption{Dendrogram for the stock data}
+\label{fig:dendro}
+\end{figure}
+
+\begin{figure}
+<<echo=T, fig.height=4>>=
+hc.dissim <- data.frame(k = seq_along(hclust.mod$height),
+                        dissimilarity = rev(hclust.mod$height))
+
+plot(hc.dissim$k, hc.dissim$dissimilarity, type="l", xlim=c(0,30))
+@
+\caption{Skree plot for the stock data}
+\label{fig:skree}
+\end{figure}
+
+From the skree plot in \cref{fig:skree} a good choice might be $k = 6$, as this value is at the breaking point of the curve.
+
+\subsection*{c}
+<<echo=T>>= 
+N_CLUSTERS = 6
+h.clusters <- cutree(hclust.mod, N_CLUSTERS)
+@
+
+\begin{figure}
+<<echo=T,fig.height=4>>=
+df = as.data.frame(table(h.clusters, data$Industry))
+ggplot(df, aes(x=h.clusters, y=Freq, fill=Var2)) + geom_bar(stat="identity") +
+  xlab("Cluster") + ylab("Count")
+@
+\caption{Industries in each hierarchical cluster}
+\label{fig:clusters}
+\end{figure}
+
+<<echo=T, results=T>>=
+cluster.avgR = aggregate(data, by=list(h.clusters), FUN=mean)
+cluster.avgR$avg200810
+cluster.avgR$avg200903
+@
+The distribution of industries in each cluster can be seen in \cref{fig:clusters}.
+Cluster 1 makes up the majority of companies, and this is the cluster for companies who did not experience much volatility (relatively) during the crisis. Most of the companies in the industries serving basic necessities fall in this catgory: utilities, health care, telecom and consumer staples.
+
+The next two clusters (2 and 3) is for the companies in the medium volatility range, with cluster 2 recovering more during March 2009 than cluster 3. Interestingly, we find almost all energy companies in cluster 3, and not cluster 1.
+
+Cluster 6 is the most affected of these 4 clusters, losing 35\%.
+
+Cluster 4 is AIG, which crashed spectacularly in 2008, and I would consider it an outlier for this dataset. The fact that they gained $94$ percent in March 2009 does not mean much, as their stock was very low at this point compared to before the crash.
+
+Cluster 5 is interesting, as they seem to consist mostly of financial companies that were able to recover to some extent in 2009.
+
+\subsection*{d}
+
+<<echo=T>>=
+set.seed(123) # Reproduce results
+km <- kmeans(returns, centers = N_CLUSTERS, iter.max=100)
+@
+
+\begin{figure}
+<<fig.height=4>>=
+df = as.data.frame(table(km$cluster, data$Industry))
+ggplot(df, aes(x=Var1, y=Freq, fill=Var2)) + geom_bar(stat="identity") +
+  xlab("Cluster") + ylab("Count")
+@
+\caption{Industries in each kmeans cluster}
+\label{fig:clusterskmeans}
+\end{figure}
+
+<<echo=T, results=T>>=
+cluster.avgR = aggregate(data, by=list(km$cluster), FUN=mean)
+cluster.avgR$avg200810
+cluster.avgR$avg200903
+@
+
+The distribution of industries in the resulting kmeans clusters can be seen in \cref{fig:clusterskmeans}. The kmeans cluster 1 and 5 is together pretty much the same as cluster 1 and 2 in the hierarchical clustering, but the kmeans has placed a lot more companies in the second group. 
+
+Cluster 2 is again just AIG, while clusters 3 and 4 is similar to clusters 5 and 6 in the hierarchical clustering. Lastly, cluster 6 is very similar to cluster 3 in the hierarchical clustering.
+
+\subsection*{e}
+
+Using this model, an investor can identify different classes of companies. The model considers the monthly returns over the period from 2006 to 2016, and groups the companies from these returns. So companies from different clusters have a different patterns in their returns, and this can therefore be used as a tool to diversify investments.
+
+
+
+
+
+\end{document}
